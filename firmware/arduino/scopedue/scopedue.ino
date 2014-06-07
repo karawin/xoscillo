@@ -126,7 +126,7 @@ void ProcessSerialUSBCommand( byte in )
     numChannels = SerialUSB.read();
     for (int i=0;i<4;i++)
     {
-      channels[i] = SerialUSB.read();
+      channels[i] = SerialUSB.read() + A0;
     }
     DataMain = DataMain * numChannels;
     if (DataMain > MAXMEM)
@@ -209,7 +209,43 @@ inline void computeBuffer()
         }
     }  
 }  
+//**************************************************************************************/
+static inline uint32_t mapResolution(uint32_t value, uint32_t from, uint32_t to) {
+	if (from == to)
+		return value;
+	if (from > to)
+		return value >> (from-to);
+	else
+		return value << (to-from);
+}
+//**************************************************************************************/
+inline uint32_t myanalogRead(uint32_t ulPin)
+{
+  uint32_t ulValue = 0;
+  uint32_t ulChannel;
+  static uint32_t latestSelectedChannel = -1;
+  
+  ulChannel = g_APinDescription[ulPin].ulADCChannelNumber ;
+			// Enable the corresponding channel
+			if (ulChannel != latestSelectedChannel) {
+				adc_enable_channel( ADC, (adc_channel_num_t)ulChannel );
+				if ( latestSelectedChannel != -1 )
+					adc_disable_channel( ADC, (adc_channel_num_t)latestSelectedChannel );
+				latestSelectedChannel = ulChannel;
+			}
 
+			// Start the ADC
+			adc_start( ADC );
+
+			// Wait for end of conversion
+			while ((adc_get_status(ADC) & ADC_ISR_DRDY) != ADC_ISR_DRDY)
+				;
+
+			// Read the value
+			ulValue = adc_get_latest_value(ADC); 
+                        ulValue = mapResolution(ulValue, ADC_RESOLUTION, 8);
+  return ulValue;
+}  
 //**************************************************************************************/
 void loop() 
 {
@@ -222,7 +258,7 @@ void loop()
   {
       while (!flagTimer2) ; 
       flagTimer2 = false;
-      unsigned char v = analogRead(channels[channel]);         
+      unsigned char v = myanalogRead(channels[channel]);         
       if ( triggered == 0  )
     {
       if ( ((v >= triggerVoltage) && ( lastADC < triggerVoltage )) || (triggerVoltage == 0) )
