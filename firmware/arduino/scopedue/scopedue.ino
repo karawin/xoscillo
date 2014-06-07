@@ -55,16 +55,19 @@ unsigned int  cindex;
 unsigned char buffer[MAXMEM+10];  // un peu de marge
 unsigned char command = CMD_IDLE;
 
+//**************************************************************************************/
 void finterrupt1()  // Clignote pour faire joli
 {
 	flagTimer1 = !flagTimer1;
         digitalWrite(ledPin, flagTimer1?LOW:HIGH);
 }   
+//**************************************************************************************/
 void finterrupt2()  // base de temps
 {
 	flagTimer2 = true;
 }  
   
+//**************************************************************************************/
 void setup() 
 {
   analogReadResolution(8);  //sur 8 bits seulement
@@ -91,6 +94,36 @@ void setup()
     digitalWrite(i, LOW);    
   }
 }
+//**************************************************************************************/
+inline void myPreanalogRead(uint32_t ulPin)
+{
+  uint32_t ulChannel;
+  static uint32_t latestSelectedChannel = -1;
+  
+  ulChannel = g_APinDescription[ulPin].ulADCChannelNumber ;
+			// Enable the corresponding channel
+			if (ulChannel != latestSelectedChannel) {
+				adc_enable_channel( ADC, (adc_channel_num_t)ulChannel );
+				if ( latestSelectedChannel != -1 )
+					adc_disable_channel( ADC, (adc_channel_num_t)latestSelectedChannel );
+				latestSelectedChannel = ulChannel;
+			}
+
+			// Start the ADC
+			adc_start( ADC );
+}
+inline uint32_t myanalogRead()
+{
+  uint32_t ulValue = 0;
+			// Wait for end of conversion
+			while ((adc_get_status(ADC) & ADC_ISR_DRDY) != ADC_ISR_DRDY)
+				;
+
+			// Read the value
+			ulValue = adc_get_latest_value(ADC); 
+                        ulValue = mapResolution(ulValue, ADC_RESOLUTION, 8);
+  return ulValue;
+}  
 //**************************************************************************************/
 void ProcessSerialUSBCommand( byte in )
 {
@@ -153,6 +186,7 @@ void ProcessSerialUSBCommand( byte in )
     lastADC = analogRead(channels[channel]);
 
     command = CMD_READ_ADC_TRACE;
+    myPreanalogRead(channels[channel]);
     flagTimer2 = false;
   }
   else if ( in == CMD_READ_BIN_TRACE )
@@ -218,34 +252,7 @@ static inline uint32_t mapResolution(uint32_t value, uint32_t from, uint32_t to)
 	else
 		return value << (to-from);
 }
-//**************************************************************************************/
-inline uint32_t myanalogRead(uint32_t ulPin)
-{
-  uint32_t ulValue = 0;
-  uint32_t ulChannel;
-  static uint32_t latestSelectedChannel = -1;
-  
-  ulChannel = g_APinDescription[ulPin].ulADCChannelNumber ;
-			// Enable the corresponding channel
-			if (ulChannel != latestSelectedChannel) {
-				adc_enable_channel( ADC, (adc_channel_num_t)ulChannel );
-				if ( latestSelectedChannel != -1 )
-					adc_disable_channel( ADC, (adc_channel_num_t)latestSelectedChannel );
-				latestSelectedChannel = ulChannel;
-			}
 
-			// Start the ADC
-			adc_start( ADC );
-
-			// Wait for end of conversion
-			while ((adc_get_status(ADC) & ADC_ISR_DRDY) != ADC_ISR_DRDY)
-				;
-
-			// Read the value
-			ulValue = adc_get_latest_value(ADC); 
-                        ulValue = mapResolution(ulValue, ADC_RESOLUTION, 8);
-  return ulValue;
-}  
 //**************************************************************************************/
 void loop() 
 {
@@ -256,9 +263,10 @@ void loop()
   
   if ( command == CMD_READ_ADC_TRACE )
   {
+      unsigned char v = myanalogRead();         
       while (!flagTimer2) ; 
       flagTimer2 = false;
-      unsigned char v = myanalogRead(channels[channel]);         
+
       if ( triggered == 0  )
     {
       if ( ((v >= triggerVoltage) && ( lastADC < triggerVoltage )) || (triggerVoltage == 0) )
@@ -267,14 +275,15 @@ void loop()
       }
       else
       {
-        lastADC = v;   
+        lastADC = v;  
+        myPreanalogRead(channels[channel]);   
         return;
       }
     }
       
     channel++; 
     channel = channel% numChannels; 
-
+    myPreanalogRead(channels[channel]);   
     buffer[cindex] = v;
     computeBuffer();
   }
